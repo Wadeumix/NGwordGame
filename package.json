@@ -1,0 +1,12 @@
+{
+  "name": "ng-word-game",
+  "version": "1.0.0",
+  "description": "NGワードゲーム - 各プレイヤーのNGワードを自動選定するリアルタイム対戦Webアプリ",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

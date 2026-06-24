@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>NGワードゲーム</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- 接続状態 -->
+      <div id="conn" class="conn"></div>
+
+      <!-- 1. 名前登録 / 部屋作成・参加 -->
+      <section id="screen-home" class="screen">
+        <h1>NGワードゲーム</h1>
+        <p class="lead">名前を登録して、部屋を作るか参加しよう。</p>
+        <label>あなたの名前
+          <input id="nameInput" type="text" maxlength="12" placeholder="なまえ" />
+        </label>
+        <div id="joinBox" class="join-box hidden">
+          <p>部屋 <b id="joinCode"></b> に参加します</p>
+        </div>
+        <div class="row">
+          <button id="createBtn" class="primary">部屋を作成</button>
+        </div>
+        <div class="or">または</div>
+        <div class="row">
+          <input id="roomCodeInput" type="text" inputmode="numeric" maxlength="4" placeholder="部屋コード" />
+          <button id="joinBtn">参加</button>
+        </div>
+        <p id="homeError" class="error"></p>
+      </section>
+
+      <!-- 2. ロビー -->
+      <section id="screen-lobby" class="screen hidden">
+        <h2>ロビー</h2>
+        <div class="share">
+          <div>部屋コード: <b id="lobbyCode" class="code"></b></div>
+          <button id="copyBtn" class="ghost">招待URLをコピー</button>
+        </div>
+        <h3>プレイヤー</h3>
+        <ul id="lobbyPlayers" class="players"></ul>
+
+        <div id="hostSettings" class="settings hidden">
+          <h3>ゲーム設定（ホスト）</h3>
+          <label>入力の制限時間（秒）
+            <input id="setTime" type="number" min="10" max="600" step="10" />
+          </label>
+          <label>1人あたりのNGワード数
+            <input id="setNg" type="number" min="1" max="10" />
+          </label>
+        </div>
+        <p id="lobbyHint" class="hint"></p>
+        <div class="row">
+          <button id="startInputBtn" class="primary hidden">入力フェーズを開始</button>
+          <button id="leaveLobbyBtn" class="ghost danger">退出</button>
+        </div>
+      </section>
+
+      <!-- 3. 入力フェーズ -->
+      <section id="screen-input" class="screen hidden">
+        <div class="timerbar"><span id="timer">--</span> 秒</div>
+        <h2>言いそうなワードを入力</h2>
+        <p class="lead">各プレイヤーが「言いそう／使いそう」なワードを入れよう。</p>
+        <div id="targetTabs" class="tabs"></div>
+        <div class="row">
+          <input id="wordInput" type="text" maxlength="20" placeholder="ワードを入力" />
+          <button id="addWordBtn" class="primary">追加</button>
+        </div>
+        <ul id="wordList" class="wordlist"></ul>
+        <div class="row">
+          <button id="doneInputBtn" class="primary">入力完了</button>
+          <button id="leaveInputBtn" class="ghost danger">退出</button>
+        </div>
+        <p id="doneHint" class="hint"></p>
+      </section>
+
+      <!-- 4. NG公開 / プレイ中 -->
+      <section id="screen-play" class="screen hidden">
+        <h2 id="playTitle">NGワード公開</h2>
+        <p class="lead" id="playLead"></p>
+        <ul id="ngList" class="nglist"></ul>
+        <div class="row">
+          <button id="startGameBtn" class="primary hidden">ゲーム開始</button>
+          <button id="leavePlayBtn" class="ghost danger">退出</button>
+        </div>
+      </section>
+
+      <!-- 5. 終了 -->
+      <section id="screen-end" class="screen hidden">
+        <h2>ゲーム終了</h2>
+        <p id="endResult" class="lead"></p>
+        <div class="row">
+          <button id="restartBtn" class="primary hidden">ロビーに戻る（ホスト）</button>
+          <button id="leaveEndBtn" class="ghost">退出</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 投票モーダル -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-card">
+        <p id="modalText"></p>
+        <p id="modalTally" class="tally"></p>
+        <div class="row">
+          <button id="voteYes" class="primary">はい（失格）</button>
+          <button id="voteNo" class="ghost">いいえ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 結果トースト -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
