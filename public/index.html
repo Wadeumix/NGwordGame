@@ -26,6 +26,10 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body class="wf-mplus1p">
+
+    <!-- 右上固定 退出ボタン（部屋に入ったら表示） -->
+    <button id="leaveBtn" class="leave-btn hidden">退出</button>
+
     <div id="app">
       <!-- 接続状態 -->
       <div id="conn" class="conn"></div>
@@ -134,36 +138,40 @@
         <p id="lobbyHint" class="hint"></p>
         <div class="row">
           <button id="startInputBtn" class="primary glow hidden">入力フェーズを開始</button>
-          <button id="leaveLobbyBtn" class="ghost danger">退出</button>
         </div>
       </section>
 
       <!-- 3. 入力フェーズ -->
       <section id="screen-input" class="screen hidden">
         <div class="timerbar"><span id="timer">--</span> 秒</div>
+        <p id="timerExpiredMsg" class="timer-expired hidden">時間切れ！全員が入力を完了するまでお待ちください</p>
         <h2>言いそうなワードを入力</h2>
-        <p class="lead">各プレイヤーが「言いそう／使いそう」なワードを入れよう。</p>
+        <p class="lead">各プレイヤーが「言いそう／使いそう」なワードを入れよう。<br><small>各プレイヤーに最低2つ入力してください（3文字以上）</small></p>
         <div id="targetTabs" class="tabs"></div>
         <div class="row">
-          <input id="wordInput" type="text" maxlength="20" placeholder="ワードを入力" />
+          <input id="wordInput" type="text" maxlength="20" placeholder="3文字以上で入力" />
           <button id="addWordBtn" class="primary glow">追加</button>
         </div>
+        <p id="wordError" class="error"></p>
         <ul id="wordList" class="wordlist"></ul>
         <div class="row">
           <button id="doneInputBtn" class="primary glow">入力完了</button>
-          <button id="leaveInputBtn" class="ghost danger">退出</button>
         </div>
         <p id="doneHint" class="hint"></p>
       </section>
 
       <!-- 4. NG公開 / プレイ中 -->
       <section id="screen-play" class="screen hidden">
-        <h2 id="playTitle">NGワード公開</h2>
+        <div class="play-header">
+          <h2 id="playTitle">NGワード公開</h2>
+          <div id="gameTimerWrap" class="game-timer hidden">
+            <span id="gameTimer">00:00</span>
+          </div>
+        </div>
         <p class="lead" id="playLead"></p>
-        <ul id="ngList" class="nglist"></ul>
+        <div id="playerGrid" class="player-grid"></div>
         <div class="row">
           <button id="startGameBtn" class="primary glow hidden">ゲーム開始</button>
-          <button id="leavePlayBtn" class="ghost danger">退出</button>
         </div>
       </section>
 
@@ -173,9 +181,15 @@
         <p id="endResult" class="lead"></p>
         <div class="row">
           <button id="restartBtn" class="primary glow hidden">ロビーに戻る（ホスト）</button>
-          <button id="leaveEndBtn" class="ghost">退出</button>
         </div>
       </section>
+    </div>
+
+    <!-- 下部 投票バー（playing中に選択したら出現） -->
+    <div id="voteBar" class="vote-bar hidden">
+      <span id="voteBarName" class="vote-bar-name"></span>さんを失格にしますか？
+      <button id="voteBarYes" class="vote-bar-yes glow">失格</button>
+      <button id="voteBarClose" class="vote-bar-close">✕</button>
     </div>
 
     <!-- 投票モーダル -->

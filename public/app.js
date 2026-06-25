@@ -12,11 +12,40 @@ if (!playerId) {
 let myName = localStorage.getItem("ng_name") || "";
 
 let roomCode = null;
-let state = null; // 直近のサーバ状態
-let es = null; // EventSource
-let activeTarget = null; // 入力フェーズで選択中の対象
-let currentVoteId = null; // モーダル表示中の投票
-let localSettings = null; // ホストの設定バッファ（確定までサーバに送らない）
+let state = null;
+let es = null;
+let activeTarget = null;
+let currentVoteId = null;
+let localSettings = null;
+let localInputWords = {}; // 入力フェーズのローカルバッファ { [targetId]: string[] }
+let selectedPlayerId = null; // プレイ画面で選択中のプレイヤー
+
+// ---- カウントアップタイマー ----
+let gameStartTime = null;
+let gameTimerHandle = null;
+
+function startGameTimer() {
+  if (gameStartTime) return; // 既に起動済み
+  gameStartTime = Date.now();
+  if (gameTimerHandle) clearInterval(gameTimerHandle);
+  gameTimerHandle = setInterval(tickGameTimer, 1000);
+}
+
+function tickGameTimer() {
+  if (!gameStartTime) return;
+  const el = $("gameTimer");
+  if (!el) return;
+  const elapsed = Math.floor((Date.now() - gameStartTime) / 1000);
+  const m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const s = String(elapsed % 60).padStart(2, "0");
+  el.textContent = `${m}:${s}`;
+}
+
+function stopGameTimer() {
+  if (gameTimerHandle) clearInterval(gameTimerHandle);
+  gameTimerHandle = null;
+  gameStartTime = null;
+}
 
 // ---- API ----
 async function api(type, extra = {}) {
@@ -44,8 +73,7 @@ let lastDisqualified = new Set();
 
 function applyState(data) {
   if (!data || data.missing) return;
-  if (!roomCode) return; // 退出後に遅れて届いた応答は無視（ホーム表示の上書き防止）
-  // 失格者が増えたらトースト表示（vote_result の代わり）
+  if (!roomCode) return;
   const dq = new Set((data.players || []).filter((p) => p.disqualified).map((p) => p.id));
   for (const p of data.players || []) {
     if (dq.has(p.id) && !lastDisqualified.has(p.id)) {
@@ -61,7 +89,6 @@ function applyState(data) {
 
 function connect() {
   if (es) es.close();
-  // SSE（使える環境なら即時反映）
   try {
     es = new EventSource(`/events?room=${roomCode}&pid=${playerId}`);
     es.onmessage = (ev) => {
@@ -82,7 +109,6 @@ function connect() {
     /* SSE 非対応でもポーリングで動く */
   }
 
-  // ポーリング（SSE がバッファされる Cloudflare 無料トンネル等でも確実に動く保険）
   if (pollTimer) clearInterval(pollTimer);
   poll();
   pollTimer = setInterval(poll, 1500);
@@ -101,10 +127,7 @@ async function poll() {
 
 function setConn(ok) {
   const c = $("conn");
-  if (!roomCode) {
-    c.textContent = "";
-    return;
-  }
+  if (!roomCode) { c.textContent = ""; return; }
   c.textContent = ok ? "● 接続中" : "● 再接続中…";
   c.className = "conn" + (ok ? "" : " off");
 }
@@ -117,20 +140,14 @@ function showScreen(id) {
 
 function render() {
   if (!state) return;
+  // 退出ボタン表示
+  $("leaveBtn").classList.toggle("hidden", !roomCode);
   switch (state.phase) {
-    case "lobby":
-      renderLobby();
-      break;
-    case "input":
-      renderInput();
-      break;
+    case "lobby":   renderLobby(); break;
+    case "input":   renderInput(); break;
     case "reveal":
-    case "playing":
-      renderPlay();
-      break;
-    case "ended":
-      renderEnd();
-      break;
+    case "playing": renderPlay(); break;
+    case "ended":   renderEnd(); break;
   }
   renderVoteModal();
 }
@@ -138,6 +155,7 @@ function render() {
 // ---- ロビー ----
 function renderLobby() {
   showScreen("screen-lobby");
+  stopGameTimer();
   $("lobbyCode").textContent = state.roomCode;
   const ul = $("lobbyPlayers");
   ul.innerHTML = "";
@@ -148,7 +166,6 @@ function renderLobby() {
     if (!p.connected) li.innerHTML += `<span class="badge off">未接続</span>`;
     ul.appendChild(li);
   }
-  // 設定（セグメントボタン）。ホストはデバイス側でバッファして即時描画。
   $("hostSettings").classList.remove("hidden");
   if (state.isHost) {
     if (!localSettings) localSettings = { ...state.settings };
@@ -157,14 +174,11 @@ function renderLobby() {
     $("hostSettings").querySelector("h3").textContent = "ゲーム設定（ホスト）";
     updateConfirmBtn();
   } else {
-    // 非ホストはサーバの確定値を閲覧のみ
     renderSeg("segTime", state.settings.inputTimeLimitSec, false);
     renderSeg("segNg", state.settings.ngWordsPerPlayer, false);
     $("hostSettings").querySelector("h3").textContent = "ゲーム設定（ホストが設定中）";
     $("confirmSettingsBtn").classList.add("hidden");
   }
-
-  // 参加人数アニメーション
   animateCount(state.players.length);
   $("startInputBtn").classList.toggle("hidden", !state.isHost);
   $("startInputBtn").disabled = state.players.length < 2;
@@ -182,7 +196,6 @@ function renderSeg(id, value, enabled) {
   }
 }
 
-// 確定ボタンの見た目（ローカル設定とサーバ確定値の差で「未確定/確定済み」を表示）
 function updateConfirmBtn() {
   const btn = $("confirmSettingsBtn");
   btn.classList.remove("hidden");
@@ -200,19 +213,14 @@ function updateConfirmBtn() {
   }
 }
 
-// 参加人数: 増えたら「数字はスケールのみ」+「canvasパーティクルで弾ける演出」
+// 参加人数アニメーション
 let lastCount = 0;
 function animateCount(n) {
   const el = $("pcNum");
   el.textContent = n;
   if (n > lastCount) {
-    // 数字はスケールのインのみ（再描画と無関係に動くWeb Animations API）
     el.animate(
-      [
-        { transform: "scale(1)" },
-        { transform: "scale(1.45)", offset: 0.4 },
-        { transform: "scale(1)" },
-      ],
+      [{ transform: "scale(1)" }, { transform: "scale(1.45)", offset: 0.4 }, { transform: "scale(1)" }],
       { duration: 450, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }
     );
     burstParticles();
@@ -220,7 +228,7 @@ function animateCount(n) {
   lastCount = n;
 }
 
-// ---- canvas パーティクル（前レイヤー） ----
+// ---- canvas パーティクル ----
 let pcCanvas, pcCtx, pcParticles = [], pcRaf = null;
 const PC_COLORS = ["#22c55e", "#4ade80", "#16a34a", "#86efac", "#bbf7d0"];
 
@@ -228,7 +236,7 @@ function ensurePcCanvas() {
   if (!pcCanvas) pcCanvas = $("pcCanvas");
   if (!pcCanvas) return false;
   const rect = pcCanvas.getBoundingClientRect();
-  if (rect.width === 0) return false; // 非表示中は描けない
+  if (rect.width === 0) return false;
   const dpr = window.devicePixelRatio || 1;
   if (pcCanvas.width !== Math.round(rect.width * dpr) || pcCanvas.height !== Math.round(rect.height * dpr)) {
     pcCanvas.width = Math.round(rect.width * dpr);
@@ -241,20 +249,15 @@ function ensurePcCanvas() {
 
 function burstParticles() {
   if (!ensurePcCanvas()) return;
-  const w = pcCanvas.clientWidth;
-  const h = pcCanvas.clientHeight;
-  const cx = w / 2;
-  const cy = h * 0.42;
+  const w = pcCanvas.clientWidth, h = pcCanvas.clientHeight;
+  const cx = w / 2, cy = h * 0.42;
   for (let i = 0; i < 30; i++) {
     const a = Math.random() * Math.PI * 2;
     const sp = 2 + Math.random() * 4.5;
     pcParticles.push({
-      x: cx,
-      y: cy,
-      vx: Math.cos(a) * sp,
-      vy: Math.sin(a) * sp - 1.5,
-      life: 1,
-      decay: 0.012 + Math.random() * 0.015,
+      x: cx, y: cy,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.5,
+      life: 1, decay: 0.012 + Math.random() * 0.015,
       size: 2.5 + Math.random() * 3.5,
       color: PC_COLORS[i % PC_COLORS.length],
     });
@@ -263,19 +266,10 @@ function burstParticles() {
 }
 
 function stepParticles() {
-  if (!pcCtx) {
-    pcRaf = null;
-    return;
-  }
-  const w = pcCanvas.clientWidth;
-  const h = pcCanvas.clientHeight;
+  if (!pcCtx) { pcRaf = null; return; }
+  const w = pcCanvas.clientWidth, h = pcCanvas.clientHeight;
   pcCtx.clearRect(0, 0, w, h);
-  for (const p of pcParticles) {
-    p.vy += 0.13; // 重力
-    p.x += p.vx;
-    p.y += p.vy;
-    p.life -= p.decay;
-  }
+  for (const p of pcParticles) { p.vy += 0.13; p.x += p.vx; p.y += p.vy; p.life -= p.decay; }
   pcParticles = pcParticles.filter((p) => p.life > 0);
   for (const p of pcParticles) {
     pcCtx.globalAlpha = Math.max(0, p.life);
@@ -285,49 +279,55 @@ function stepParticles() {
     pcCtx.fill();
   }
   pcCtx.globalAlpha = 1;
-  if (pcParticles.length > 0) {
-    pcRaf = requestAnimationFrame(stepParticles);
-  } else {
-    pcCtx.clearRect(0, 0, w, h);
-    pcRaf = null;
-  }
+  if (pcParticles.length > 0) { pcRaf = requestAnimationFrame(stepParticles); }
+  else { pcCtx.clearRect(0, 0, w, h); pcRaf = null; }
 }
 
 // ---- 入力フェーズ ----
 function renderInput() {
   showScreen("screen-input");
-  $("timer").textContent = state.timer != null ? state.timer : "--";
+
+  const timerVal = state.timer != null ? state.timer : null;
+  const expired = state.timerExpired;
+
+  if (expired) {
+    $("timer").textContent = "0";
+    $("timerbar").classList.add("urgent");
+    $("timerExpiredMsg").classList.remove("hidden");
+  } else {
+    $("timer").textContent = timerVal != null ? timerVal : "--";
+    $("timerbar").classList.toggle("urgent", timerVal != null && timerVal <= 10);
+    $("timerExpiredMsg").classList.add("hidden");
+  }
 
   const others = state.players.filter((p) => p.id !== state.you);
   if (!activeTarget || !others.find((p) => p.id === activeTarget)) {
     activeTarget = others[0] ? others[0].id : null;
   }
 
-  // タブ
+  // タブ（ローカルバッファのカウントを表示）
   const tabs = $("targetTabs");
   tabs.innerHTML = "";
   for (const p of others) {
-    const count = (state.myWords[p.id] || []).length;
+    const count = (localInputWords[p.id] || []).length;
+    const warn = count < 2;
     const div = document.createElement("div");
-    div.className = "tab" + (p.id === activeTarget ? " active" : "");
+    div.className = "tab" + (p.id === activeTarget ? " active" : "") + (warn ? " warn" : "");
     div.innerHTML = `${escapeHtml(p.name)}<span class="count">${count}</span>`;
-    div.onclick = () => {
-      activeTarget = p.id;
-      renderInput();
-    };
+    div.onclick = () => { activeTarget = p.id; renderInput(); };
     tabs.appendChild(div);
   }
 
-  // ワード一覧
+  // ワード一覧（ローカルバッファから描画）
   const list = $("wordList");
   list.innerHTML = "";
-  const words = activeTarget ? state.myWords[activeTarget] || [] : [];
+  const words = activeTarget ? localInputWords[activeTarget] || [] : [];
   for (const w of words) {
     const li = document.createElement("li");
     li.textContent = w;
     const b = document.createElement("button");
     b.textContent = "×";
-    b.onclick = () => api("remove_word", { targetId: activeTarget, word: w });
+    b.onclick = () => removeWordLocal(activeTarget, w);
     li.appendChild(b);
     list.appendChild(li);
   }
@@ -337,81 +337,164 @@ function renderInput() {
   $("doneInputBtn").textContent = done ? "入力完了済み" : "入力完了";
   $("wordInput").disabled = done;
   $("addWordBtn").disabled = done;
+
   const doneCount = state.players.filter((p) => p.inputDone).length;
-  $("doneHint").textContent = `完了: ${doneCount} / ${state.players.length}　（全員完了か時間切れで次へ）`;
+  $("doneHint").textContent = `完了: ${doneCount} / ${state.players.length}人`;
 }
 
 function addWord() {
+  if (state?.iAmDone) return;
   const inp = $("wordInput");
   const word = inp.value.trim();
-  if (!word || !activeTarget) return;
-  api("submit_word", { targetId: activeTarget, word });
+  const errEl = $("wordError");
+
+  if (word.length < 3) {
+    errEl.textContent = "3文字以上入力してください";
+    return;
+  }
+  if (!activeTarget) return;
+
+  errEl.textContent = "";
+  if (!localInputWords[activeTarget]) localInputWords[activeTarget] = [];
+  if (!localInputWords[activeTarget].includes(word)) {
+    localInputWords[activeTarget].push(word);
+  }
   inp.value = "";
   inp.focus();
+  renderInput();
+}
+
+function removeWordLocal(targetId, word) {
+  if (!localInputWords[targetId]) return;
+  localInputWords[targetId] = localInputWords[targetId].filter((w) => w !== word);
+  renderInput();
 }
 
 // ---- NG公開 / プレイ中 ----
 function renderPlay() {
   showScreen("screen-play");
+
   const playing = state.phase === "playing";
   $("playTitle").textContent = playing ? "ゲーム中" : "NGワード公開";
   $("playLead").textContent = playing
-    ? "NGワードを言った人がいたら、その人をタップして失格投票！"
+    ? "NGワードを言った人がいたら、その人のアイコンをタップして失格投票！"
     : "他のプレイヤーのNGワードです（自分のは見えません）。ホストの開始を待ちましょう。";
 
-  const ul = $("ngList");
-  ul.innerHTML = "";
+  // カウントアップタイマー
+  const timerWrap = $("gameTimerWrap");
+  if (playing) {
+    timerWrap.classList.remove("hidden");
+    startGameTimer();
+  } else {
+    timerWrap.classList.add("hidden");
+    stopGameTimer();
+  }
+
+  // 選択中のプレイヤーが失格や退出してたら選択解除
+  if (selectedPlayerId) {
+    const p = state.players.find((p) => p.id === selectedPlayerId);
+    if (!p || p.disqualified) {
+      selectedPlayerId = null;
+      $("voteBar").classList.add("hidden");
+    }
+  }
+
+  // グリッドアイコン描画
+  const grid = $("playerGrid");
+  grid.innerHTML = "";
   for (const p of state.players) {
-    const li = document.createElement("li");
     const isMe = p.id === state.you;
-    if (isMe) li.classList.add("me");
-    if (p.disqualified) li.classList.add("dq");
+    const card = document.createElement("div");
+    card.className = "player-card" +
+      (isMe ? " me" : "") +
+      (p.disqualified ? " dq" : "") +
+      (playing && !isMe && !p.disqualified ? " tappable" : "") +
+      (p.id === selectedPlayerId ? " selected" : "");
 
-    let right = "";
+    // アイコン（名前の頭文字）
+    const iconEl = document.createElement("div");
+    iconEl.className = "player-card-icon";
+    iconEl.textContent = [...p.name][0] || "?";
+    card.appendChild(iconEl);
+
+    // 名前
+    const nameEl = document.createElement("div");
+    nameEl.className = "player-card-name";
+    nameEl.textContent = p.name;
     if (isMe) {
-      right = `<span class="badge">あなたのNGは秘密</span>`;
-    } else {
-      const words = (state.ngWords[p.id] || []).map((w) => `<span>${escapeHtml(w)}</span>`).join("");
-      right = `<div class="ng-words">${words || "<span class='badge'>なし</span>"}</div>`;
+      const youTag = document.createElement("span");
+      youTag.className = "you-tag";
+      youTag.textContent = "あなた";
+      nameEl.appendChild(youTag);
     }
-    const dq = p.disqualified ? `<span class="badge dq">失格</span>` : "";
-    li.innerHTML = `<span>${escapeHtml(p.name)}${isMe ? " (あなた)" : ""}${dq}</span>${right}`;
+    card.appendChild(nameEl);
 
-    // プレイ中のみ、生存している他人をタップで失格提案
-    if (playing && !isMe && !p.disqualified) {
-      li.classList.add("tappable");
-      li.onclick = () => proposeDisqualify(p);
+    // NGワード
+    const ngEl = document.createElement("div");
+    ngEl.className = "player-card-ng";
+    if (p.disqualified) {
+      const badge = document.createElement("span");
+      badge.className = "dq-badge";
+      badge.textContent = "失格";
+      ngEl.appendChild(badge);
+    } else if (isMe) {
+      const secret = document.createElement("span");
+      secret.className = "secret";
+      secret.textContent = "秘密";
+      ngEl.appendChild(secret);
+    } else {
+      const words = state.ngWords[p.id] || [];
+      if (words.length === 0) {
+        const empty = document.createElement("span");
+        empty.className = "secret";
+        empty.textContent = "なし";
+        ngEl.appendChild(empty);
+      } else {
+        for (const w of words) {
+          const s = document.createElement("span");
+          s.textContent = w;
+          ngEl.appendChild(s);
+        }
+      }
     }
-    ul.appendChild(li);
+    card.appendChild(ngEl);
+
+    // タップで失格提案（playing中のみ）
+    if (playing && !isMe && !p.disqualified) {
+      card.onclick = () => selectPlayer(p);
+    }
+
+    grid.appendChild(card);
   }
 
   $("startGameBtn").classList.toggle("hidden", !(state.isHost && state.phase === "reveal"));
 }
 
-function proposeDisqualify(p) {
-  if (state.vote) {
-    showToast("既に投票中です");
-    return;
-  }
-  if (confirm(`${p.name} さんを失格にしますか？`)) {
-    api("propose_disqualify", { targetId: p.id }).then((r) => {
-      if (!r.ok) showToast(r.error);
-    });
-  }
+function selectPlayer(p) {
+  if (state.vote) { showToast("既に投票中です"); return; }
+  selectedPlayerId = p.id;
+  $("voteBarName").textContent = p.name;
+  $("voteBar").classList.remove("hidden");
+  renderPlay();
+}
+
+function proposeDisqualify() {
+  if (!selectedPlayerId) return;
+  const p = state.players.find((pl) => pl.id === selectedPlayerId);
+  if (!p) return;
+  api("propose_disqualify", { targetId: selectedPlayerId }).then((r) => {
+    if (!r.ok) showToast(r.error);
+  });
+  $("voteBar").classList.add("hidden");
+  selectedPlayerId = null;
 }
 
 // ---- 投票モーダル ----
 function renderVoteModal() {
   const v = state.vote;
   if (!v || !v.isVoter || v.hasVoted) {
-    // 自分が投票不要 or 投票済みなら閉じる（ただし結果待ち表示は残さない）
-    if (!v) {
-      hideModal();
-      currentVoteId = null;
-    } else if (v.isVoter && v.hasVoted) {
-      // 投票済み: tally を見せたいのでモーダルは閉じてトーストでも良いが、ここは閉じる
-      hideModal();
-    }
+    if (!v) { hideModal(); currentVoteId = null; }
+    else if (v.isVoter && v.hasVoted) { hideModal(); }
     return;
   }
   currentVoteId = v.id;
@@ -433,6 +516,8 @@ function hideModal() {
 // ---- 終了 ----
 function renderEnd() {
   showScreen("screen-end");
+  stopGameTimer();
+  $("voteBar").classList.add("hidden");
   const alive = state.players.filter((p) => !p.disqualified);
   $("endResult").textContent =
     alive.length === 1 ? `優勝: ${alive[0].name} さん！` : "ゲームが終了しました。";
@@ -450,7 +535,9 @@ function showToast(msg) {
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
 }
 
 function leave() {
@@ -460,11 +547,16 @@ function leave() {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
     localSettings = null;
+    localInputWords = {};
+    selectedPlayerId = null;
     lastCount = 0;
     roomCode = null;
     state = null;
     currentVoteId = null;
+    stopGameTimer();
     hideModal();
+    $("voteBar").classList.add("hidden");
+    $("leaveBtn").classList.add("hidden");
     history.replaceState(null, "", location.pathname);
     resetHome();
     showScreen("screen-home");
@@ -472,7 +564,6 @@ function leave() {
   });
 }
 
-// ホーム画面を初期状態に戻す（URL参加→退出後の表示崩れ対策）
 function resetHome() {
   $("joinBox").classList.add("hidden");
   $("joinCode").textContent = "";
@@ -505,6 +596,8 @@ async function joinRoom(code) {
 
 function enterRoom(code) {
   roomCode = code;
+  localInputWords = {};
+  selectedPlayerId = null;
   history.replaceState(null, "", `?room=${code}`);
   connect();
 }
@@ -527,7 +620,8 @@ function init() {
       () => prompt("このURLを共有してください", url)
     );
   };
-  // 設定はデバイス側のバッファを即時更新（サーバ送信しない）
+
+  // セグメントボタン（ローカルバッファのみ更新）
   for (const b of $("segTime").querySelectorAll("button")) {
     b.onclick = () => {
       if (!localSettings) return;
@@ -544,7 +638,6 @@ function init() {
       updateConfirmBtn();
     };
   }
-  // 「設定を確定」でまとめてサーバ送信
   $("confirmSettingsBtn").onclick = async () => {
     if (!localSettings) return;
     const r = await api("update_settings", {
@@ -554,7 +647,6 @@ function init() {
     if (r.ok) showToast("設定を確定しました");
   };
   $("startInputBtn").onclick = async () => {
-    // 念のため最新のローカル設定を確定してから開始
     if (localSettings) {
       await api("update_settings", {
         inputTimeLimitSec: localSettings.inputTimeLimitSec,
@@ -564,17 +656,50 @@ function init() {
     const r = await api("start_input");
     if (!r.ok) showToast(r.error);
   };
+
+  // 入力フェーズ
   $("addWordBtn").onclick = addWord;
-  $("wordInput").addEventListener("keydown", (e) => e.key === "Enter" && addWord());
-  $("doneInputBtn").onclick = () => api("finish_input");
+  $("wordInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addWord();
+  });
+  $("wordInput").addEventListener("input", () => {
+    $("wordError").textContent = "";
+  });
+  $("doneInputBtn").onclick = async () => {
+    // バリデーション: 全員に2つ以上
+    if (!state) return;
+    const others = state.players.filter((p) => p.id !== state.you);
+    const incomplete = others.filter((p) => (localInputWords[p.id] || []).length < 2);
+    if (incomplete.length > 0) {
+      const names = incomplete.map((p) => p.name).join("、");
+      showToast(`${names} さんへのワードが2つ未満です`);
+      return;
+    }
+    const r = await api("finish_input", { words: localInputWords });
+    if (!r.ok) showToast(r.error);
+  };
+
+  // プレイ画面
   $("startGameBtn").onclick = () => api("start_game").then((r) => !r.ok && showToast(r.error));
+  $("voteBarYes").onclick = proposeDisqualify;
+  $("voteBarClose").onclick = () => {
+    selectedPlayerId = null;
+    $("voteBar").classList.add("hidden");
+    if (state?.phase === "playing") renderPlay();
+  };
+
+  // 投票モーダル
   $("voteYes").onclick = () => vote(true);
   $("voteNo").onclick = () => vote(false);
-  $("restartBtn").onclick = () => api("restart");
 
-  for (const id of ["leaveLobbyBtn", "leaveInputBtn", "leavePlayBtn", "leaveEndBtn"]) {
-    $(id).onclick = leave;
-  }
+  // 終了画面
+  $("restartBtn").onclick = () => {
+    stopGameTimer();
+    api("restart");
+  };
+
+  // 右上退出ボタン（全画面共通）
+  $("leaveBtn").onclick = leave;
 
   // URL に部屋コードがあれば参加準備
   const params = new URLSearchParams(location.search);

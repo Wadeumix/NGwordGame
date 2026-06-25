@@ -133,6 +133,7 @@ function buildStateFor(room, viewer) {
     settings: room.settings,
     players,
     timer: remaining,
+    timerExpired: room.timerExpired || false,
   };
 
   // 入力フェーズ: 自分が各対象に入力済みのワード
@@ -197,7 +198,9 @@ function startInputTimer(room) {
       return;
     }
     if (now() >= room.inputTimerEnd) {
-      finishInputPhase(room);
+      clearInterval(room.tickHandle);
+      room.timerExpired = true; // タイマー切れ → 全員完了待ち
+      broadcastState(room);
     } else {
       broadcastState(room);
     }
@@ -381,6 +384,7 @@ function handleAction(msg, res) {
       room.phase = "input";
       room.submissions = {};
       room.doneInput = new Set();
+      room.timerExpired = false;
       room.inputTimerEnd = now() + room.settings.inputTimeLimitSec * 1000;
       broadcastState(room);
       startInputTimer(room);
@@ -418,6 +422,21 @@ function handleAction(msg, res) {
 
     case "finish_input": {
       if (room.phase !== "input") return fail("入力フェーズではありません");
+      // ローカルバッファのワードを一括登録
+      const words = msg.words || {};
+      for (const [targetId, wordList] of Object.entries(words)) {
+        if (targetId === player.id) continue;
+        if (!room.players.has(targetId)) continue;
+        room.submissions[targetId] = room.submissions[targetId] || [];
+        for (const w of wordList) {
+          const word = String(w).trim().slice(0, 20);
+          if (!word) continue;
+          const dup = room.submissions[targetId].some(
+            (s) => s.fromId === player.id && s.word.trim().toLowerCase() === word.toLowerCase()
+          );
+          if (!dup) room.submissions[targetId].push({ word, fromId: player.id });
+        }
+      }
       room.doneInput.add(player.id);
       broadcastState(room);
       checkAllInputDone(room);
