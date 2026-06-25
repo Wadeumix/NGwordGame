@@ -33,6 +33,10 @@ const MIME = {
 };
 
 // 紛らわしい文字（0/O/1/I/L）を除いた6桁。総当たり困難（約10億通り）。
+function genSessionId() {
+  return "s" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 function genRoomCode() {
   let code;
@@ -297,10 +301,11 @@ function handleAction(msg, res) {
     const name = (msg.name || "").trim();
     if (!name) return fail("名前を入力してください");
     if (rooms.size >= MAX_ROOMS) return fail("混雑しています。しばらくしてからお試しください");
+    const sessionId = genSessionId();
     const code = genRoomCode();
     const room = {
       code,
-      hostId: msg.playerId,
+      hostId: sessionId,
       phase: "lobby",
       settings: { inputTimeLimitSec: 120, ngWordsPerPlayer: 2 },
       players: new Map(),
@@ -312,8 +317,8 @@ function handleAction(msg, res) {
       vote: null,
       lastActivity: now(),
     };
-    room.players.set(msg.playerId, {
-      id: msg.playerId,
+    room.players.set(sessionId, {
+      id: sessionId,
       name,
       connected: false,
       disqualified: false,
@@ -322,28 +327,19 @@ function handleAction(msg, res) {
       lastSeen: now(),
     });
     rooms.set(code, room);
-    return reply({ ok: true, roomCode: code });
+    return reply({ ok: true, roomCode: code, sessionId });
   }
 
   if (type === "join_room") {
-    // 入力コードは大文字に正規化（コードは英数字大文字のみ）
     const room = rooms.get(String(msg.roomCode || "").trim().toUpperCase());
     if (!room) return fail("部屋が見つかりません");
     room.lastActivity = now();
     const name = (msg.name || "").trim();
     if (!name) return fail("名前を入力してください");
-    const existing = room.players.get(msg.playerId);
-    if (existing) {
-      // 再参加（リロード等）
-      existing.name = name;
-      existing.left = false;
-      existing.lastSeen = now();
-      broadcastState(room);
-      return reply({ ok: true, roomCode: room.code });
-    }
     if (room.phase !== "lobby") return fail("ゲームが既に開始しています");
-    room.players.set(msg.playerId, {
-      id: msg.playerId,
+    const sessionId = genSessionId();
+    room.players.set(sessionId, {
+      id: sessionId,
       name,
       connected: false,
       disqualified: false,
@@ -352,18 +348,18 @@ function handleAction(msg, res) {
       lastSeen: now(),
     });
     broadcastState(room);
-    return reply({ ok: true, roomCode: room.code });
+    return reply({ ok: true, roomCode: room.code, sessionId });
   }
 
   // 以降は部屋とプレイヤーが必要
   const room = rooms.get(msg.roomCode);
   if (!room) return fail("部屋が見つかりません");
-  const player = room.players.get(msg.playerId);
-  if (!player) return fail("プレイヤー情報がありません。再参加してください");
+  const player = room.players.get(msg.sessionId);
+  if (!player) return fail("セッションが無効です。再参加してください");
   player.lastSeen = now();
   room.lastActivity = now();
 
-  const isHost = msg.playerId === room.hostId;
+  const isHost = msg.sessionId === room.hostId;
 
   switch (type) {
     case "update_settings": {
@@ -550,9 +546,9 @@ function removePlayer(room, player, permanent) {
 // ---- SSE 接続 ----
 function handleSSE(req, res, url) {
   const roomCode = url.searchParams.get("room");
-  const playerId = url.searchParams.get("pid");
+  const sessionId = url.searchParams.get("sid");
   const room = rooms.get(roomCode);
-  if (!room || !room.players.has(playerId)) {
+  if (!room || !room.players.has(sessionId)) {
     res.writeHead(404);
     res.end();
     return;
@@ -564,7 +560,7 @@ function handleSSE(req, res, url) {
   });
   res.write("retry: 2000\n\n");
 
-  const player = room.players.get(playerId);
+  const player = room.players.get(sessionId);
   player.res = res;
   player.connected = true;
   player.left = false;
@@ -640,7 +636,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const room = rooms.get(url.searchParams.get("room"));
-    const player = room && room.players.get(url.searchParams.get("pid"));
+    const player = room && room.players.get(url.searchParams.get("sid"));
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
     if (!room || !player) {
       res.end(JSON.stringify({ type: "state", missing: true }));

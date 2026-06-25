@@ -3,13 +3,15 @@
 
 const $ = (id) => document.getElementById(id);
 
-// ---- 永続的な playerId ----
+// playerId はlocalStorage由来（後方互換のため残すが主要な識別はsessionIdに移行）
 let playerId = localStorage.getItem("ng_pid");
 if (!playerId) {
   playerId = "p" + Math.random().toString(36).slice(2) + Date.now().toString(36);
   localStorage.setItem("ng_pid", playerId);
 }
 let myName = localStorage.getItem("ng_name") || "";
+// sessionId: 部屋参加ごとにサーバーが発行（localStorageに保存しない）
+let sessionId = null;
 
 let roomCode = null;
 let state = null;
@@ -53,7 +55,7 @@ async function api(type, extra = {}) {
     const res = await fetch("/api", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, playerId, roomCode, ...extra }),
+      body: JSON.stringify({ type, playerId, sessionId, roomCode, ...extra }),
     });
     return res.json();
   } catch (e) {
@@ -90,7 +92,7 @@ function applyState(data) {
 function connect() {
   if (es) es.close();
   try {
-    es = new EventSource(`/events?room=${roomCode}&pid=${playerId}`);
+    es = new EventSource(`/events?room=${roomCode}&sid=${sessionId}`);
     es.onmessage = (ev) => {
       const data = JSON.parse(ev.data);
       if (data.type === "state") {
@@ -117,7 +119,7 @@ function connect() {
 async function poll() {
   if (!roomCode) return;
   try {
-    const res = await fetch(`/state?room=${roomCode}&pid=${playerId}`, { cache: "no-store" });
+    const res = await fetch(`/state?room=${roomCode}&sid=${sessionId}`, { cache: "no-store" });
     const data = await res.json();
     applyState(data);
   } catch {
@@ -555,6 +557,7 @@ function leave() {
     selectedPlayerId = null;
     lastCount = 0;
     roomCode = null;
+    sessionId = null;
     state = null;
     currentVoteId = null;
     stopGameTimer();
@@ -584,6 +587,7 @@ async function createRoom() {
   saveName(name);
   const r = await api("create_room", { name });
   if (!r.ok) return ($("homeError").textContent = r.error);
+  sessionId = r.sessionId;
   enterRoom(r.roomCode);
 }
 
@@ -595,12 +599,14 @@ async function joinRoom(code) {
   saveName(name);
   const r = await api("join_room", { name, roomCode: code });
   if (!r.ok) return ($("homeError").textContent = r.error);
+  sessionId = r.sessionId;
   enterRoom(r.roomCode);
 }
 
 function enterRoom(code) {
   roomCode = code;
   localInputWords = {};
+  // sessionId は create/join 後にセット済み
   selectedPlayerId = null;
   history.replaceState(null, "", `?room=${code}`);
   connect();
@@ -672,7 +678,7 @@ function init() {
   $("doneInputBtn").onclick = async () => {
     // バリデーション: 全員に2つ以上
     if (!state) return;
-    const others = state.players.filter((p) => p.id !== state.you);
+    const others = state.players.filter((p) => !p.isMe);
     const incomplete = others.filter((p) => (localInputWords[p.id] || []).length < 2);
     if (incomplete.length > 0) {
       const names = incomplete.map((p) => p.name).join("、");
