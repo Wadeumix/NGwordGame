@@ -300,18 +300,18 @@ function renderInput() {
     $("timerExpiredMsg").classList.add("hidden");
   }
 
-  // 自分以外を対象にする（isMe / state.you どちらでも判定）
-  const others = state.players.filter((p) => !p.isMe && p.id !== state.you);
-  // どちらのフィルターも効かない場合は全員表示（自分は追加時にサーバーで弾く）
-  const targets = others.length > 0 ? others : state.players.filter((p) => !p.isMe || p.id !== state.you);
-  if (!activeTarget || !targets.find((p) => p.id === activeTarget)) {
-    activeTarget = targets[0] ? targets[0].id : null;
+  // 自分以外を対象に（フィルター失敗時は全員表示してサーバーで弾く）
+  const targets = state.players.filter((p) => !p.isMe && p.id !== state.you);
+  const showAll = targets.length === 0;
+  const tabList = showAll ? state.players : targets;
+  if (!activeTarget || !tabList.find((p) => p.id === activeTarget)) {
+    activeTarget = tabList[0] ? tabList[0].id : null;
   }
 
   // タブ（ローカルバッファのカウントを表示）
   const tabs = $("targetTabs");
   tabs.innerHTML = "";
-  for (const p of targets) {
+  for (const p of tabList) {
     const count = (localInputWords[p.id] || []).length;
     const warn = count < 2;
     const div = document.createElement("div");
