@@ -300,15 +300,18 @@ function renderInput() {
     $("timerExpiredMsg").classList.add("hidden");
   }
 
-  const others = state.players.filter((p) => !p.isMe);
-  if (!activeTarget || !others.find((p) => p.id === activeTarget)) {
-    activeTarget = others[0] ? others[0].id : null;
+  // 自分以外を対象にする（isMe / state.you どちらでも判定）
+  const others = state.players.filter((p) => !p.isMe && p.id !== state.you);
+  // どちらのフィルターも効かない場合は全員表示（自分は追加時にサーバーで弾く）
+  const targets = others.length > 0 ? others : state.players.filter((p) => !p.isMe || p.id !== state.you);
+  if (!activeTarget || !targets.find((p) => p.id === activeTarget)) {
+    activeTarget = targets[0] ? targets[0].id : null;
   }
 
   // タブ（ローカルバッファのカウントを表示）
   const tabs = $("targetTabs");
   tabs.innerHTML = "";
-  for (const p of others) {
+  for (const p of targets) {
     const count = (localInputWords[p.id] || []).length;
     const warn = count < 2;
     const div = document.createElement("div");
@@ -321,7 +324,7 @@ function renderInput() {
   // ワード一覧（ローカルバッファから描画）
   const list = $("wordList");
   list.innerHTML = "";
-  const words = activeTarget ? localInputWords[activeTarget] || [] : [];
+  const words = activeTarget ? (localInputWords[activeTarget] || []) : [];
   for (const w of words) {
     const li = document.createElement("li");
     li.textContent = w;
