@@ -353,7 +353,7 @@ function addWord() {
     errEl.textContent = "3文字以上入力してください";
     return;
   }
-  if (!activeTarget) { showToast("対象プレイヤーを選んでください"); return; }
+  if (!activeTarget) { showToast(`対象なし players:${state?.players?.length} you:${state?.you?.slice(0,6)}`); return; }
 
   errEl.textContent = "";
   if (!localInputWords[activeTarget]) localInputWords[activeTarget] = [];
