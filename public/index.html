@@ -4,56 +4,136 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
     <title>NGワードゲーム</title>
+    <meta name="description" content="みんなで言いそうなワードを当て合うパーティゲーム" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- OGP / Twitter カード（__OG_BASE__ はサーバが現在の公開URLに置換） -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="NGワードゲーム" />
+    <meta property="og:description" content="みんなで言いそうなワードを当て合うパーティゲーム" />
+    <meta property="og:image" content="__OG_BASE__/og.png" />
+    <meta property="og:url" content="__OG_BASE__/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NGワードゲーム" />
+    <meta name="twitter:description" content="みんなで言いそうなワードを当て合うパーティゲーム" />
+    <meta name="twitter:image" content="__OG_BASE__/og.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
+  <body class="wf-mplus1p">
     <div id="app">
       <!-- 接続状態 -->
       <div id="conn" class="conn"></div>
 
       <!-- 1. 名前登録 / 部屋作成・参加 -->
       <section id="screen-home" class="screen">
-        <h1>NGワードゲーム</h1>
+        <div class="logo">
+          <span class="logo-ng">NG</span><span class="logo-word">ワード</span>
+          <div class="logo-sub">GAME</div>
+        </div>
         <p class="lead">名前を登録して、部屋を作るか参加しよう。</p>
-        <label>あなたの名前
-          <input id="nameInput" type="text" maxlength="12" placeholder="なまえ" />
-        </label>
+
         <div id="joinBox" class="join-box hidden">
           <p>部屋 <b id="joinCode"></b> に参加します</p>
         </div>
+
+        <label class="field-label">あなたの名前</label>
         <div class="row">
-          <button id="createBtn" class="primary">部屋を作成</button>
+          <input id="nameInput" type="text" maxlength="12" placeholder="なまえ" />
+          <button id="createBtn" class="primary glow">部屋を作成</button>
         </div>
-        <div class="or">または</div>
+
+        <div class="or">― または ―</div>
         <div class="row">
-          <input id="roomCodeInput" type="text" inputmode="numeric" maxlength="4" placeholder="部屋コード" />
-          <button id="joinBtn">参加</button>
+          <input id="roomCodeInput" type="text" maxlength="6" placeholder="部屋コード" autocapitalize="characters" autocomplete="off" style="text-transform: uppercase" />
+          <button id="joinBtn" class="glow">参加</button>
         </div>
         <p id="homeError" class="error"></p>
+
+        <!-- トップページ下部: 概要・ルール・ホスト説明 -->
+        <div class="info">
+          <h3>🎮 このゲームについて</h3>
+          <p>
+            みんなで「言いそうなワード」を出し合って、各プレイヤーの<b>NGワード</b>を決めるパーティゲーム。
+            自分のNGワードは自分には見えません。会話の中でうっかり言ってしまったら、みんなの投票で失格に！
+          </p>
+
+          <h3>📋 ルール</h3>
+          <ol>
+            <li>名前を登録して部屋を作る → URLで友達を招待</li>
+            <li>制限時間内に、自分以外の各プレイヤーへ「言いそうなワード」を入力</li>
+            <li>集まった候補から、各人のNGワードがランダムに決定</li>
+            <li>自分以外のNGワードが画面に表示される（自分のは秘密）</li>
+            <li>NGワードを言った人を見つけたら名前をタップ → 全員一致の投票で失格</li>
+            <li>最後まで残った人が勝ち！</li>
+          </ol>
+
+          <h3>👑 部屋のホストができること</h3>
+          <ul class="info-host">
+            <li>
+              <b>入力制限時間の設定</b>：みんながNGワード候補を入力できる時間（10〜240秒）を選べます。
+              時間切れか全員完了で次に進みます。
+            </li>
+            <li>
+              <b>NGワード数の設定</b>：1人あたりのNGワードをいくつにするか（1〜5個／全て）を選べます。
+              「全て」を選ぶと、入力された候補が全部NGワードになります。
+            </li>
+            <li><b>入力フェーズの開始・ゲーム開始</b>：進行のスタートを切れます。</li>
+          </ul>
+        </div>
       </section>
 
       <!-- 2. ロビー -->
       <section id="screen-lobby" class="screen hidden">
-        <h2>ロビー</h2>
-        <div class="share">
-          <div>部屋コード: <b id="lobbyCode" class="code"></b></div>
-          <button id="copyBtn" class="ghost">招待URLをコピー</button>
+        <div class="lobby-head">
+          <h2>ロビー</h2>
+          <div class="code-chip">部屋コード <b id="lobbyCode" class="code"></b></div>
         </div>
+        <button id="copyBtn" class="glow wide">📋 招待URLをコピー</button>
+
         <h3>プレイヤー</h3>
         <ul id="lobbyPlayers" class="players"></ul>
 
         <div id="hostSettings" class="settings hidden">
           <h3>ゲーム設定（ホスト）</h3>
-          <label>入力の制限時間（秒）
-            <input id="setTime" type="number" min="10" max="600" step="10" />
-          </label>
-          <label>1人あたりのNGワード数
-            <input id="setNg" type="number" min="1" max="10" />
-          </label>
+          <div class="setting">
+            <div class="setting-label">NGワード候補の入力制限時間</div>
+            <div class="seg" id="segTime">
+              <button data-val="10">10秒</button>
+              <button data-val="60">60秒</button>
+              <button data-val="120">120秒</button>
+              <button data-val="240">240秒</button>
+            </div>
+          </div>
+          <div class="setting">
+            <div class="setting-label">1人あたりのNGワード数</div>
+            <div class="seg" id="segNg">
+              <button data-val="1">1つ</button>
+              <button data-val="2">2つ</button>
+              <button data-val="3">3つ</button>
+              <button data-val="4">4つ</button>
+              <button data-val="5">5つ</button>
+              <button data-val="0">全て</button>
+            </div>
+          </div>
+          <button id="confirmSettingsBtn" class="glow wide">設定を確定</button>
         </div>
+
+        <!-- 集まった人数（中央・ポップアニメーション） -->
+        <div class="player-count">
+          <canvas class="pc-canvas" id="pcCanvas"></canvas>
+          <div class="pc-num" id="pcNum">0</div>
+          <div class="pc-label">人が参加中</div>
+        </div>
+
         <p id="lobbyHint" class="hint"></p>
         <div class="row">
-          <button id="startInputBtn" class="primary hidden">入力フェーズを開始</button>
+          <button id="startInputBtn" class="primary glow hidden">入力フェーズを開始</button>
           <button id="leaveLobbyBtn" class="ghost danger">退出</button>
         </div>
       </section>
@@ -66,11 +146,11 @@
         <div id="targetTabs" class="tabs"></div>
         <div class="row">
           <input id="wordInput" type="text" maxlength="20" placeholder="ワードを入力" />
-          <button id="addWordBtn" class="primary">追加</button>
+          <button id="addWordBtn" class="primary glow">追加</button>
         </div>
         <ul id="wordList" class="wordlist"></ul>
         <div class="row">
-          <button id="doneInputBtn" class="primary">入力完了</button>
+          <button id="doneInputBtn" class="primary glow">入力完了</button>
           <button id="leaveInputBtn" class="ghost danger">退出</button>
         </div>
         <p id="doneHint" class="hint"></p>
@@ -82,7 +162,7 @@
         <p class="lead" id="playLead"></p>
         <ul id="ngList" class="nglist"></ul>
         <div class="row">
-          <button id="startGameBtn" class="primary hidden">ゲーム開始</button>
+          <button id="startGameBtn" class="primary glow hidden">ゲーム開始</button>
           <button id="leavePlayBtn" class="ghost danger">退出</button>
         </div>
       </section>
@@ -92,7 +172,7 @@
         <h2>ゲーム終了</h2>
         <p id="endResult" class="lead"></p>
         <div class="row">
-          <button id="restartBtn" class="primary hidden">ロビーに戻る（ホスト）</button>
+          <button id="restartBtn" class="primary glow hidden">ロビーに戻る（ホスト）</button>
           <button id="leaveEndBtn" class="ghost">退出</button>
         </div>
       </section>
@@ -104,7 +184,7 @@
         <p id="modalText"></p>
         <p id="modalTally" class="tally"></p>
         <div class="row">
-          <button id="voteYes" class="primary">はい（失格）</button>
+          <button id="voteYes" class="primary glow">はい（失格）</button>
           <button id="voteNo" class="ghost">いいえ</button>
         </div>
       </div>
@@ -112,6 +192,8 @@
 
     <!-- 結果トースト -->
     <div id="toast" class="toast hidden"></div>
+
+    <footer class="site-author">サイト作者：兎音奏多</footer>
 
     <script src="app.js"></script>
   </body>

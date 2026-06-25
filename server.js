@@ -12,6 +12,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
 const VOTE_TIMEOUT_MS = 30_000;
+const PRESENCE_TIMEOUT_MS = 12_000; // この時間 通信が無く接続も無ければ退出扱い
+const REAP_INTERVAL_MS = 5_000;
+const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2時間 無操作の部屋は自動削除
+const MAX_ROOMS = 2000; // メモリ枯渇防止の上限
 
 // ---- ゲーム状態（メモリ内） ----
 /** @type {Map<string, Room>} */
@@ -23,19 +27,49 @@ const MIME = {
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
   ".ico": "image/x-icon",
 };
 
+// 紛らわしい文字（0/O/1/I/L）を除いた6桁。総当たり困難（約10億通り）。
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 function genRoomCode() {
   let code;
   do {
-    code = Math.floor(1000 + Math.random() * 9000).toString();
+    code = "";
+    for (let i = 0; i < 6; i++) {
+      code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+    }
   } while (rooms.has(code));
   return code;
 }
 
 function now() {
   return Date.now();
+}
+
+// ---- レート制限（スライディングウィンドウ、IPごと） ----
+const rateBuckets = new Map(); // key: "ip|name" -> { count, reset }
+function rateLimit(ip, name, max, windowMs) {
+  const key = ip + "|" + name;
+  const t = now();
+  let b = rateBuckets.get(key);
+  if (!b || t > b.reset) {
+    b = { count: 0, reset: t + windowMs };
+    rateBuckets.set(key, b);
+  }
+  b.count++;
+  return b.count <= max;
+}
+function getIp(req) {
+  // Cloudflare 経由だと remoteAddress は 127.0.0.1 になるため実IPはヘッダから取る
+  return (
+    req.headers["cf-connecting-ip"] ||
+    (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    req.socket.remoteAddress ||
+    "unknown"
+  );
 }
 
 // ---- ユーティリティ ----
@@ -188,7 +222,8 @@ function selectNgWords(room) {
       if (key && !seen.has(key)) seen.set(key, s.word.trim());
     }
     const candidates = shuffle([...seen.values()]);
-    room.ngWords[target.id] = candidates.slice(0, room.settings.ngWordsPerPlayer);
+    const take = room.settings.ngWordsPerPlayer === 0 ? candidates.length : room.settings.ngWordsPerPlayer;
+    room.ngWords[target.id] = candidates.slice(0, take);
   }
 }
 
@@ -257,6 +292,7 @@ function handleAction(msg, res) {
   if (type === "create_room") {
     const name = (msg.name || "").trim();
     if (!name) return fail("名前を入力してください");
+    if (rooms.size >= MAX_ROOMS) return fail("混雑しています。しばらくしてからお試しください");
     const code = genRoomCode();
     const room = {
       code,
@@ -270,6 +306,7 @@ function handleAction(msg, res) {
       inputTimerEnd: null,
       tickHandle: null,
       vote: null,
+      lastActivity: now(),
     };
     room.players.set(msg.playerId, {
       id: msg.playerId,
@@ -278,14 +315,17 @@ function handleAction(msg, res) {
       disqualified: false,
       left: false,
       res: null,
+      lastSeen: now(),
     });
     rooms.set(code, room);
     return reply({ ok: true, roomCode: code });
   }
 
   if (type === "join_room") {
-    const room = rooms.get(msg.roomCode);
+    // 入力コードは大文字に正規化（コードは英数字大文字のみ）
+    const room = rooms.get(String(msg.roomCode || "").trim().toUpperCase());
     if (!room) return fail("部屋が見つかりません");
+    room.lastActivity = now();
     const name = (msg.name || "").trim();
     if (!name) return fail("名前を入力してください");
     const existing = room.players.get(msg.playerId);
@@ -293,6 +333,7 @@ function handleAction(msg, res) {
       // 再参加（リロード等）
       existing.name = name;
       existing.left = false;
+      existing.lastSeen = now();
       broadcastState(room);
       return reply({ ok: true, roomCode: room.code });
     }
@@ -304,6 +345,7 @@ function handleAction(msg, res) {
       disqualified: false,
       left: false,
       res: null,
+      lastSeen: now(),
     });
     broadcastState(room);
     return reply({ ok: true, roomCode: room.code });
@@ -314,6 +356,8 @@ function handleAction(msg, res) {
   if (!room) return fail("部屋が見つかりません");
   const player = room.players.get(msg.playerId);
   if (!player) return fail("プレイヤー情報がありません。再参加してください");
+  player.lastSeen = now();
+  room.lastActivity = now();
 
   const isHost = msg.playerId === room.hostId;
 
@@ -323,8 +367,9 @@ function handleAction(msg, res) {
       if (room.phase !== "lobby") return fail("ロビーでのみ設定できます");
       const t = parseInt(msg.inputTimeLimitSec, 10);
       const n = parseInt(msg.ngWordsPerPlayer, 10);
-      if (Number.isFinite(t)) room.settings.inputTimeLimitSec = Math.min(600, Math.max(10, t));
-      if (Number.isFinite(n)) room.settings.ngWordsPerPlayer = Math.min(10, Math.max(1, n));
+      if (Number.isFinite(t)) room.settings.inputTimeLimitSec = Math.min(600, Math.max(5, t));
+      // ngWordsPerPlayer: 0 は「全て」を意味する
+      if (Number.isFinite(n)) room.settings.ngWordsPerPlayer = n === 0 ? 0 : Math.min(10, Math.max(1, n));
       broadcastState(room);
       return reply({ ok: true });
     }
@@ -535,8 +580,19 @@ async function serveStatic(req, res, url) {
     return;
   }
   try {
-    const data = await readFile(filePath);
     const ext = path.extname(filePath);
+    // index.html は OGP の絶対URLを「現在アクセスされているURL」に動的置換
+    // （公開URLが起動ごとに変わっても、サムネ画像が正しく参照される）
+    if (ext === ".html") {
+      let html = await readFile(filePath, "utf8");
+      const proto = (req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
+      const base = `${proto}://${req.headers.host}`;
+      html = html.replaceAll("__OG_BASE__", base);
+      res.writeHead(200, { "Content-Type": MIME[ext] });
+      res.end(html);
+      return;
+    }
+    const data = await readFile(filePath);
     res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
     res.end(data);
   } catch {
@@ -553,11 +609,41 @@ const server = http.createServer(async (req, res) => {
     return handleSSE(req, res, url);
   }
 
+  const ip = getIp(req);
+
+  // ポーリング用: SSE が使えない環境（Cloudflare 無料トンネル等）向けの状態取得
+  if (req.method === "GET" && url.pathname === "/state") {
+    // ポーリングは高頻度なので上限は緩め（同一IPで複数人プレイも考慮）
+    if (!rateLimit(ip, "state", 240, 10_000)) {
+      res.writeHead(429, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ type: "state", missing: true }));
+      return;
+    }
+    const room = rooms.get(url.searchParams.get("room"));
+    const player = room && room.players.get(url.searchParams.get("pid"));
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    if (!room || !player) {
+      res.end(JSON.stringify({ type: "state", missing: true }));
+      return;
+    }
+    player.connected = true;
+    player.left = false;
+    player.lastSeen = now();
+    res.end(JSON.stringify(buildStateFor(room, player)));
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api") {
+    // API全体のレート制限
+    if (!rateLimit(ip, "api", 150, 10_000)) {
+      res.writeHead(429, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: "リクエストが多すぎます。少し待ってください" }));
+      return;
+    }
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 1e6) req.destroy();
+      if (body.length > 1e5) req.destroy(); // 100KB上限
     });
     req.on("end", () => {
       let msg;
@@ -566,6 +652,12 @@ const server = http.createServer(async (req, res) => {
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "不正なリクエスト" }));
+        return;
+      }
+      // 部屋作成は厳しめに制限（スパムでメモリを食う攻撃を防ぐ）
+      if (msg.type === "create_room" && !rateLimit(ip, "create", 5, 60_000)) {
+        res.writeHead(429, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "部屋の作成が多すぎます。1分ほど待ってください" }));
         return;
       }
       try {
@@ -586,6 +678,44 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(405);
   res.end("Method Not Allowed");
 });
+
+// ---- プレゼンス（生存確認）: いなくなったプレイヤーを自動退出 ----
+// 生存 = SSE接続が開いている OR 直近で通信があった（バックグラウンドのタブは
+// SSEが開いたままなので誤検知しない。ブラウザを閉じると接続が切れ通信も止まる）。
+setInterval(() => {
+  const t = now();
+  for (const room of [...rooms.values()]) {
+    const dropped = [];
+    for (const p of room.players.values()) {
+      if (p.left) continue;
+      const present = p.res !== null || t - (p.lastSeen || 0) < PRESENCE_TIMEOUT_MS;
+      if (!present) dropped.push(p);
+    }
+    for (const p of dropped) removePlayer(room, p, true);
+
+    // 部屋の自動削除: 空 or 長時間 無操作なら破棄してメモリを解放
+    if (rooms.has(room.code)) {
+      const empty = activePlayers(room).length === 0;
+      const stale = t - (room.lastActivity || 0) > ROOM_TTL_MS;
+      if (empty || stale) {
+        clearInterval(room.tickHandle);
+        for (const p of room.players.values()) {
+          if (p.res) {
+            try {
+              p.res.end();
+            } catch {}
+          }
+        }
+        rooms.delete(room.code);
+      }
+    }
+  }
+
+  // 期限切れのレート制限バケットを掃除（メモリリーク防止）
+  for (const [key, b] of rateBuckets) {
+    if (t > b.reset) rateBuckets.delete(key);
+  }
+}, REAP_INTERVAL_MS);
 
 server.listen(PORT, () => {
   console.log(`NGワードゲーム: http://localhost:${PORT}`);

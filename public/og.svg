@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="20%" r="90%">
+      <stop offset="0%" stop-color="#d6ffe6" />
+      <stop offset="55%" stop-color="#f4fff8" />
+      <stop offset="100%" stop-color="#ffffff" />
+    </radialGradient>
+    <linearGradient id="ng" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22c55e" />
+      <stop offset="100%" stop-color="#4ade80" />
+    </linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#22c55e" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <rect width="1200" height="1200" fill="url(#bg)" />
+
+  <!-- 中央バンド(y:285〜915)に収まるよう配置。最終的にこの範囲を1200x630で切り出す -->
+  <g font-family="'M PLUS 1p','Hiragino Sans',sans-serif" font-weight="800" text-anchor="middle">
+    <!-- ロゴ行: NGボックス + ワード -->
+    <rect x="300" y="470" width="200" height="170" rx="32" fill="url(#ng)" filter="url(#sh)" />
+    <text x="400" y="592" font-size="118" fill="#ffffff">NG</text>
+    <text x="660" y="592" font-size="96" fill="#16a34a">ワード</text>
+    <!-- GAME -->
+    <text x="600" y="690" font-size="36" fill="#4ade80" letter-spacing="18">G A M E</text>
+    <!-- タグライン -->
+    <text x="600" y="800" font-size="38" font-weight="700" fill="#6b8676">みんなで言いそうなワードを当て合うパーティゲーム</text>
+  </g>
+</svg>
