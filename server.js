@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
 const VOTE_TIMEOUT_MS = 30_000;
-const PRESENCE_TIMEOUT_MS = 12_000; // この時間 通信が無く接続も無ければ退出扱い
+const PRESENCE_TIMEOUT_MS = 45_000; // この時間 通信が無く接続も無ければ退出扱い
 const REAP_INTERVAL_MS = 5_000;
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2時間 無操作の部屋は自動削除
 const MAX_ROOMS = 2000; // メモリ枯渇防止の上限
@@ -705,7 +705,8 @@ setInterval(() => {
     for (const p of room.players.values()) {
       if (p.left) continue;
       const present = p.res !== null || t - (p.lastSeen || 0) < PRESENCE_TIMEOUT_MS;
-      if (!present) dropped.push(p);
+      // inputフェーズ中は一時切断でも退出扱いしない（タブ対象から消えるのを防ぐ）
+      if (!present && room.phase !== "input") dropped.push(p);
     }
     for (const p of dropped) removePlayer(room, p, true);
 
