@@ -304,6 +304,12 @@ function renderInput() {
   if (!activeTarget || !others.find((p) => p.id === activeTarget)) {
     activeTarget = others[0] ? others[0].id : null;
   }
+  // デバッグ: othersが空なら詳細を表示
+  if (others.length === 0 && state.players.length > 0) {
+    const ids = state.players.map(p => p.id?.slice(0,4)).join(",");
+    console.warn("others empty! you=", state.you?.slice(0,4), "playerIds=", ids);
+    showToast(`IDs: you=${state.you?.slice(0,4)} all=${ids}`);
+  }
 
   // タブ（ローカルバッファのカウントを表示）
   const tabs = $("targetTabs");
