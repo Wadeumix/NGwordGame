@@ -122,6 +122,7 @@ function buildStateFor(room, viewer) {
     disqualified: p.disqualified,
     isHost: p.id === room.hostId,
     inputDone: room.doneInput.has(p.id),
+    isMe: p.id === viewer.id,
   }));
 
   const state = {

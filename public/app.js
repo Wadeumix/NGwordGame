@@ -300,15 +300,9 @@ function renderInput() {
     $("timerExpiredMsg").classList.add("hidden");
   }
 
-  const others = state.players.filter((p) => p.id !== state.you);
+  const others = state.players.filter((p) => !p.isMe);
   if (!activeTarget || !others.find((p) => p.id === activeTarget)) {
     activeTarget = others[0] ? others[0].id : null;
-  }
-  // デバッグ: othersが空なら詳細を表示
-  if (others.length === 0 && state.players.length > 0) {
-    const ids = state.players.map(p => p.id?.slice(0,4)).join(",");
-    console.warn("others empty! you=", state.you?.slice(0,4), "playerIds=", ids);
-    showToast(`IDs: you=${state.you?.slice(0,4)} all=${ids}`);
   }
 
   // タブ（ローカルバッファのカウントを表示）
@@ -359,7 +353,7 @@ function addWord() {
     errEl.textContent = "3文字以上入力してください";
     return;
   }
-  if (!activeTarget) { showToast(`対象なし players:${state?.players?.length} you:${state?.you?.slice(0,6)}`); return; }
+  if (!activeTarget) { showToast("対象プレイヤーを選んでください"); return; }
 
   errEl.textContent = "";
   if (!localInputWords[activeTarget]) localInputWords[activeTarget] = [];
@@ -410,7 +404,7 @@ function renderPlay() {
   const grid = $("playerGrid");
   grid.innerHTML = "";
   for (const p of state.players) {
-    const isMe = p.id === state.you;
+    const isMe = p.isMe;
     const card = document.createElement("div");
     card.className = "player-card" +
       (isMe ? " me" : "") +
