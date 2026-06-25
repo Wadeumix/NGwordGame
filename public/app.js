@@ -343,16 +343,17 @@ function renderInput() {
 }
 
 function addWord() {
-  if (state?.iAmDone) return;
+  if (state?.iAmDone) { showToast("入力完了済みです"); return; }
   const inp = $("wordInput");
   const word = inp.value.trim();
   const errEl = $("wordError");
 
+  if (!word) return;
   if (word.length < 3) {
     errEl.textContent = "3文字以上入力してください";
     return;
   }
-  if (!activeTarget) return;
+  if (!activeTarget) { showToast("対象プレイヤーを選んでください"); return; }
 
   errEl.textContent = "";
   if (!localInputWords[activeTarget]) localInputWords[activeTarget] = [];
