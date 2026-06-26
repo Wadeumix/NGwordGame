@@ -16,6 +16,9 @@ const PRESENCE_TIMEOUT_MS = 120_000; // この時間 通信が無く接続も無
 const REAP_INTERVAL_MS = 5_000;
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2時間 無操作の部屋は自動削除
 const MAX_ROOMS = 2000; // メモリ枯渇防止の上限
+// 静的アセットのキャッシュバスター。起動（=デプロイ）ごとに変わるので、
+// 再デプロイ後はブラウザが必ず最新の app.js / style.css を取得する。
+const ASSET_VER = Date.now().toString(36);
 
 // ---- ゲーム状態（メモリ内） ----
 /** @type {Map<string, Room>} */
@@ -604,7 +607,9 @@ async function serveStatic(req, res, url) {
       const proto = (req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
       const base = `${proto}://${req.headers.host}`;
       html = html.replaceAll("__OG_BASE__", base);
-      res.writeHead(200, { "Content-Type": MIME[ext] });
+      html = html.replaceAll("__ASSET_VER__", ASSET_VER);
+      // HTML は常に最新を取得させる（中の ?v= が新しいJS/CSSを指すため）
+      res.writeHead(200, { "Content-Type": MIME[ext], "Cache-Control": "no-cache" });
       res.end(html);
       return;
     }
